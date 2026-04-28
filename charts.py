@@ -1,0 +1,1 @@
+"""charts.py — Plotly chart builders for Global Macro."""

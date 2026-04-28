@@ -1,0 +1,1 @@
+"""engine.py — Global Macro simulation engine."""

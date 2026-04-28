@@ -1,0 +1,1 @@
+"""main.py — Streamlit UI for Global Macro."""
