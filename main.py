@@ -1,776 +1,657 @@
 """
-Responsibilities:
-  • Session state management
-  • Rendering indicators, controls, charts, news feed
-  • Delegating ALL game logic to engine.py
-  • Delegating ALL chart construction to charts.py
+ui.py — UIController for Global Macro (Python/pygame port)
+All rendering, input, and chart drawing. Engine is injected; no simulation logic here.
 """
 
-import streamlit as st
-import time
-
-from engine import (
-    COUNTRIES,
-    GameState,
-    new_game,
-    step,
-    final_score,
-)
-from charts import (
-    dashboard_chart,
-    gdp_growth_chart,
-    inflation_chart,
-    interest_rate_chart,
-    debt_chart,
-    fx_chart,
-    reputation_chart,
-    unemployment_chart,
-    PALETTE,
-)
-
-# ─────────────────────────────────────────────
-# Page config
-# ─────────────────────────────────────────────
-
-st.set_page_config(
-    page_title="Global Macro",
-    page_icon="📈",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-# ─────────────────────────────────────────────
-# Custom CSS — Finance Terminal aesthetic
-# ─────────────────────────────────────────────
-
-st.markdown(
-    """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Space+Grotesk:wght@400;600;700&display=swap');
-
-    /* Global reset */
-    html, body, [class*="css"] {
-        font-family: 'JetBrains Mono', monospace !important;
-        background-color: #0a0e1a !important;
-        color: #c8d8f0 !important;
-    }
-
-    /* Hide Streamlit chrome */
-    #MainMenu, footer, header { visibility: hidden; }
-    .stDeployButton { display: none; }
-
-    /* Main container */
-    .main .block-container {
-        padding: 1rem 2rem 2rem 2rem;
-        max-width: 100%;
-    }
-
-    /* Sidebar */
-    [data-testid="stSidebar"] {
-        background-color: #0c1221 !important;
-        border-right: 1px solid #1e2d4a;
-    }
-    [data-testid="stSidebar"] .stMarkdown, [data-testid="stSidebar"] label {
-        color: #c8d8f0 !important;
-        font-family: 'JetBrains Mono', monospace !important;
-    }
-
-    /* Sliders */
-    [data-testid="stSlider"] > div > div > div {
-        background-color: #1e2d4a !important;
-    }
-    [data-testid="stSlider"] > div > div > div > div {
-        background-color: #00e5ff !important;
-    }
-
-    /* Buttons */
-    .stButton > button {
-        background: linear-gradient(135deg, #0f3460 0%, #162040 100%) !important;
-        color: #00e5ff !important;
-        border: 1px solid #00e5ff !important;
-        border-radius: 4px !important;
-        font-family: 'JetBrains Mono', monospace !important;
-        font-size: 0.8rem !important;
-        font-weight: 600 !important;
-        letter-spacing: 0.08em !important;
-        text-transform: uppercase !important;
-        padding: 0.4rem 1rem !important;
-        transition: all 0.2s ease !important;
-    }
-    .stButton > button:hover {
-        background: linear-gradient(135deg, #00e5ff22 0%, #0f346088 100%) !important;
-        box-shadow: 0 0 15px rgba(0, 229, 255, 0.3) !important;
-    }
-
-    /* Metric cards */
-    [data-testid="stMetric"] {
-        background-color: #0f1629 !important;
-        border: 1px solid #1e2d4a !important;
-        border-radius: 6px !important;
-        padding: 0.75rem !important;
-    }
-    [data-testid="stMetricLabel"] {
-        font-size: 0.65rem !important;
-        letter-spacing: 0.1em !important;
-        color: #4a6080 !important;
-        text-transform: uppercase !important;
-    }
-    [data-testid="stMetricValue"] {
-        font-size: 1.4rem !important;
-        font-weight: 700 !important;
-        color: #c8d8f0 !important;
-    }
-    [data-testid="stMetricDelta"] {
-        font-size: 0.75rem !important;
-    }
-
-    /* Progress bars */
-    .stProgress > div > div > div {
-        background-color: #1e2d4a !important;
-    }
-
-    /* Expander */
-    [data-testid="stExpander"] {
-        background-color: #0f1629 !important;
-        border: 1px solid #1e2d4a !important;
-        border-radius: 6px !important;
-    }
-
-    /* Selectbox */
-    [data-testid="stSelectbox"] div[data-baseweb="select"] {
-        background-color: #0f1629 !important;
-        border-color: #1e2d4a !important;
-    }
-
-    /* Tabs */
-    [data-testid="stTabs"] [role="tablist"] {
-        gap: 0.5rem;
-        border-bottom: 1px solid #1e2d4a;
-    }
-    [data-testid="stTabs"] [role="tab"] {
-        background-color: #0f1629 !important;
-        border: 1px solid #1e2d4a !important;
-        border-radius: 4px 4px 0 0 !important;
-        color: #4a6080 !important;
-        font-size: 0.7rem !important;
-        letter-spacing: 0.08em !important;
-        text-transform: uppercase !important;
-        font-family: 'JetBrains Mono', monospace !important;
-    }
-    [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-        color: #00e5ff !important;
-        border-bottom-color: #0a0e1a !important;
-    }
-
-    /* Custom header */
-    .gm-header {
-        background: linear-gradient(90deg, #0c1221 0%, #0f1a35 50%, #0c1221 100%);
-        border-bottom: 1px solid #1e2d4a;
-        padding: 1rem 2rem;
-        margin: -1rem -2rem 1.5rem -2rem;
-        display: flex;
-        align-items: center;
-        gap: 1.5rem;
-    }
-    .gm-title {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #00e5ff;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        font-family: 'JetBrains Mono', monospace;
-        text-shadow: 0 0 20px rgba(0,229,255,0.4);
-    }
-    .gm-subtitle {
-        font-size: 0.7rem;
-        color: #4a6080;
-        letter-spacing: 0.2em;
-        text-transform: uppercase;
-    }
-
-    /* KPI cards */
-    .kpi-card {
-        background: #0f1629;
-        border: 1px solid #1e2d4a;
-        border-radius: 6px;
-        padding: 0.9rem 1rem;
-        position: relative;
-        overflow: hidden;
-    }
-    .kpi-card::before {
-        content: '';
-        position: absolute;
-        top: 0; left: 0;
-        width: 3px; height: 100%;
-        background: var(--accent);
-    }
-    .kpi-label {
-        font-size: 0.6rem;
-        color: #4a6080;
-        letter-spacing: 0.15em;
-        text-transform: uppercase;
-        margin-bottom: 0.3rem;
-    }
-    .kpi-value {
-        font-size: 1.5rem;
-        font-weight: 700;
-        color: var(--accent);
-        font-family: 'JetBrains Mono', monospace;
-    }
-    .kpi-delta {
-        font-size: 0.7rem;
-        color: #4a6080;
-        margin-top: 0.15rem;
-    }
-
-    /* News feed */
-    .news-item {
-        padding: 0.6rem 0.8rem;
-        border-left: 3px solid #1e2d4a;
-        margin-bottom: 0.5rem;
-        background: #0f1629;
-        border-radius: 0 4px 4px 0;
-    }
-    .news-item.negative { border-left-color: #ff4d6d; }
-    .news-item.positive { border-left-color: #00e5ff; }
-    .news-item.neutral  { border-left-color: #ffd166; }
-    .news-day {
-        font-size: 0.6rem;
-        color: #4a6080;
-        letter-spacing: 0.1em;
-    }
-    .news-headline {
-        font-size: 0.78rem;
-        color: #c8d8f0;
-    }
-
-    /* Reputation bar */
-    .rep-bar-container {
-        background: #1e2d4a;
-        border-radius: 4px;
-        height: 10px;
-        width: 100%;
-        overflow: hidden;
-    }
-    .rep-bar-fill {
-        height: 100%;
-        border-radius: 4px;
-        transition: width 0.5s ease;
-    }
-
-    /* Day progress */
-    .day-progress {
-        background: #1e2d4a;
-        border-radius: 2px;
-        height: 4px;
-        width: 100%;
-        overflow: hidden;
-        margin-top: 0.3rem;
-    }
-    .day-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #00e5ff, #bd93f9);
-        border-radius: 2px;
-    }
-
-    /* Country selector cards */
-    .country-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-        gap: 0.75rem;
-        margin: 1rem 0;
-    }
-
-    /* Alert box */
-    .alert-box {
-        border: 1px solid;
-        border-radius: 6px;
-        padding: 1rem 1.5rem;
-        margin: 0.75rem 0;
-        font-family: 'JetBrains Mono', monospace;
-    }
-    .alert-danger {
-        border-color: #ff4d6d;
-        background: rgba(255, 77, 109, 0.08);
-        color: #ff4d6d;
-    }
-    .alert-success {
-        border-color: #00e5ff;
-        background: rgba(0, 229, 255, 0.06);
-        color: #00e5ff;
-    }
-    .alert-warning {
-        border-color: #ffd166;
-        background: rgba(255, 209, 102, 0.06);
-        color: #ffd166;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# ─────────────────────────────────────────────
-# Session state helpers
-# ─────────────────────────────────────────────
-
-def _init_state() -> None:
-    if "gs" not in st.session_state:
-        st.session_state.gs = None
-    if "screen" not in st.session_state:
-        st.session_state.screen = "home"
-    if "auto_play" not in st.session_state:
-        st.session_state.auto_play = False
-    if "speed" not in st.session_state:
-        st.session_state.speed = 30  # days per step
+import math
+import pygame
+import pygame.gfxdraw
 
 
-def _start_game(country: str) -> None:
-    st.session_state.gs = new_game(country)
-    st.session_state.screen = "game"
-    st.session_state.auto_play = False
+# ─────────────────────────── Colour palette (mirrors CSS vars) ──────────────
+BG_DARK   = (5,   5,   5)
+BG_PANEL  = (10,  10,  10)
+BG_LIGHT  = (17,  17,  17)
+BG_DARKER = (0,   0,   0)
+PRIMARY   = (0,   255, 136)   # neon green
+SECONDARY = (255, 51,  51)    # neon red
+ACCENT    = (0,   204, 255)   # neon blue
+TEXT_PRI  = (224, 224, 224)
+TEXT_SEC  = (136, 136, 136)
+BORDER    = (34,  34,  34)
+GRID_LINE = (26,  26,  26)
+YELLOW    = (255, 255,  51)
+PINK      = (255, 153, 204)
+MAGENTA   = (255,  0,  255)
+GRAY      = (153, 153, 153)
+LIME      = (51,  255,  51)
+GOLD      = (204, 153,   0)
+
+COUNTRY_COLORS = {
+    "United States": ACCENT,
+    "China":         SECONDARY,
+    "Euro Area":     YELLOW,
+    "India":         MAGENTA,
+    "Japan":         PINK,
+    "Brazil":        LIME,
+    "Russia":        GRAY,
+    "Saudi Arabia":  GOLD,
+}
+
+FLAGS = {
+    "United States": "🇺🇸", "China": "🇨🇳", "Euro Area": "🇪🇺",
+    "India": "🇮🇳", "Japan": "🇯🇵", "Brazil": "🇧🇷",
+    "Russia": "🇷🇺", "Saudi Arabia": "🇸🇦",
+}
 
 
-def _reset() -> None:
-    st.session_state.gs = None
-    st.session_state.screen = "home"
-    st.session_state.auto_play = False
+# ─────────────────────────── tiny helpers ───────────────────────────────────
+def lerp_color(c1, c2, t):
+    return tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3))
 
 
-# ─────────────────────────────────────────────
-# Rendering helpers
-# ─────────────────────────────────────────────
-
-def _color_for_value(val: float, good_low: bool = False) -> str:
-    """Return a hex colour based on whether a metric is good or bad."""
-    if good_low:
-        if val < 5:  return "#00e5ff"
-        if val < 8:  return "#ffd166"
-        return "#ff4d6d"
-    else:
-        if val > 0:  return "#00e5ff"
-        if val > -1: return "#ffd166"
-        return "#ff4d6d"
+def clamp(v, lo, hi):
+    return max(lo, min(hi, v))
 
 
-def _kpi(label: str, value: str, accent: str, delta: str = "") -> str:
-    return f"""
-    <div class="kpi-card" style="--accent:{accent}">
-        <div class="kpi-label">{label}</div>
-        <div class="kpi-value">{value}</div>
-        {'<div class="kpi-delta">' + delta + '</div>' if delta else ''}
-    </div>"""
+class Button:
+    """Simple clickable rectangle."""
+    def __init__(self, rect, label, color=PRIMARY, text_color=BG_DARK):
+        self.rect = pygame.Rect(rect)
+        self.label = label
+        self.color = color
+        self.text_color = text_color
+        self.hovered = False
+
+    def draw(self, surf, font):
+        col = lerp_color(self.color, (255, 255, 255), 0.25) if self.hovered else self.color
+        pygame.draw.rect(surf, BG_LIGHT, self.rect)
+        pygame.draw.rect(surf, col, self.rect, 1)
+        txt = font.render(self.label, True, col)
+        surf.blit(txt, txt.get_rect(center=self.rect.center))
+
+    def handle(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            self.hovered = self.rect.collidepoint(event.pos)
+        if event.type == pygame.MOUSEBUTTONDOWN and self.rect.collidepoint(event.pos):
+            return True
+        return False
 
 
-def _reputation_bar(rep: float) -> str:
-    color = "#00e5ff" if rep > 50 else "#ffd166" if rep > 25 else "#ff4d6d"
-    return f"""
-    <div style="margin-bottom:0.25rem;font-size:0.6rem;letter-spacing:0.15em;color:#4a6080;text-transform:uppercase;">
-        REPUTATION — {rep:.1f}%
-    </div>
-    <div class="rep-bar-container">
-        <div class="rep-bar-fill" style="width:{rep}%;background:{color};"></div>
-    </div>"""
+# ─────────────────────────── chart helper ───────────────────────────────────
+def draw_line_chart(surf, rect, data: list, color, y_label="", bg=BG_PANEL):
+    """Draw a simple line chart inside `rect` on `surf`."""
+    x, y, w, h = rect
+    pygame.draw.rect(surf, bg, rect)
+    pygame.draw.rect(surf, BORDER, rect, 1)
 
-
-def _day_progress(day: int, max_days: int) -> str:
-    pct = day / max_days * 100
-    return f"""
-    <div style="margin-top:0.75rem;font-size:0.6rem;letter-spacing:0.1em;color:#4a6080;">
-        DAY {day} / {max_days} — {pct:.1f}% TERM COMPLETE
-    </div>
-    <div class="day-progress">
-        <div class="day-fill" style="width:{pct}%;"></div>
-    </div>"""
-
-
-def _render_news(gs: GameState) -> None:
-    if not gs.news:
-        st.markdown('<div style="color:#4a6080;font-size:0.75rem;">No events yet.</div>', unsafe_allow_html=True)
+    if len(data) < 2:
         return
-    for item in gs.news[:12]:
-        css_class = "positive" if item.impact > 0 else "negative" if item.impact < 0 else "neutral"
-        st.markdown(f"""
-        <div class="news-item {css_class}">
-            <div class="news-day">DAY {item.day} · {item.category.upper()}</div>
-            <div class="news-headline">{item.headline}</div>
-        </div>
-        """, unsafe_allow_html=True)
+
+    mn, mx = min(data), max(data)
+    spread = mx - mn
+    if spread < 1e-6:
+        spread = 1.0
+        mn -= 0.5
+
+    pad = 4
+    iw = w - pad * 2
+    ih = h - pad * 2
+
+    pts = []
+    for i, v in enumerate(data):
+        px = x + pad + int(i / (len(data) - 1) * iw)
+        py = y + pad + ih - int((v - mn) / spread * ih)
+        pts.append((px, py))
+
+    # grid line at zero if visible
+    if mn < 0 < mx:
+        zy = y + pad + ih - int((0 - mn) / spread * ih)
+        pygame.draw.line(surf, GRID_LINE, (x + pad, zy), (x + pad + iw, zy), 1)
+
+    # polygon fill (alpha-ish: draw dark fill)
+    if len(pts) >= 2:
+        poly = [pts[0]] + pts + [(pts[-1][0], y + h - pad), (pts[0][0], y + h - pad)]
+        fill_col = (color[0] // 8, color[1] // 8, color[2] // 8)
+        pygame.draw.polygon(surf, fill_col, poly)
+        pygame.draw.lines(surf, color, False, pts, 2)
+
+    # min/max labels (tiny)
+    try:
+        ft = pygame.font.SysFont("monospace", 8)
+        surf.blit(ft.render(f"{mx:.1f}", True, TEXT_SEC), (x + pad, y + pad))
+        surf.blit(ft.render(f"{mn:.1f}", True, TEXT_SEC), (x + pad, y + h - pad - 10))
+        if y_label:
+            surf.blit(ft.render(y_label, True, TEXT_SEC), (x + pad + 2, y + pad + 12))
+    except Exception:
+        pass
 
 
-# ─────────────────────────────────────────────
-# Home / country selection screen
-# ─────────────────────────────────────────────
+# ─────────────────────────── main UI class ──────────────────────────────────
+class UIController:
+    WIN_W = 1400
+    WIN_H = 820
+    FPS   = 60
 
-def render_home() -> None:
-    st.markdown("""
-    <div class="gm-header">
-        <div>
-            <div class="gm-title">⬡ GLOBAL MACRO</div>
-            <div class="gm-subtitle">Central Bank Governor Simulation</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    LEFT_W    = 250
+    RIGHT_W   = 310
+    HDR_H     = 60
+    BOT_H     = 50
+    PAD       = 10
 
-    st.markdown("""
-    <div style="max-width:700px;margin:2rem auto 1.5rem;text-align:center;">
-        <p style="font-size:1rem;color:#c8d8f0;line-height:1.7;">
-            Step into the role of <span style="color:#00e5ff;font-weight:600;">Central Bank Governor</span> and 
-            <span style="color:#bd93f9;font-weight:600;">Economic Planner</span> for a major world economy.
-            Your mandate: survive a <span style="color:#ffd166;">1,200-day term</span> without crashing the economy 
-            or being ousted by a political coup.
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
+    def __init__(self, engine):
+        self.engine = engine
+        pygame.init()
+        pygame.display.set_caption("GLOBAL MACRO")
+        self.screen = pygame.display.set_mode((self.WIN_W, self.WIN_H))
+        self.clock  = pygame.time.Clock()
 
-    # Quick-start guide
-    with st.expander("📋  HOW TO PLAY", expanded=False):
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("""
-**🎯 OBJECTIVE**
-- Survive the full 1,200-day term  
-- Keep Reputation above 0%
-- Maintain GDP Growth > 1.5%  
-- Keep Inflation near 2–3%  
-- Avoid Debt spiral (>150% GDP)
+        # Fonts
+        self.font_mono_sm  = pygame.font.SysFont("monospace",  9)
+        self.font_mono_med = pygame.font.SysFont("monospace", 11)
+        self.font_mono_lg  = pygame.font.SysFont("monospace", 14)
+        self.font_mono_xl  = pygame.font.SysFont("monospace", 18, bold=True)
+        self.font_ui       = pygame.font.SysFont("sans",      11)
 
-**⚠️ GAME OVER CONDITIONS**
-- Reputation hits 0%
-- Inflation exceeds 20%
-- GDP Growth below −8% (depression)
-- Debt/GDP exceeds 250%
-            """)
-        with c2:
-            st.markdown("""
-**🕹️ CONTROLS**
-- **Rate Override** — adjust vs Taylor Rule; raise to fight inflation, cut to boost growth
-- **Fiscal Balance** — surplus pays debt; deficit stimulates growth
-- **QE / QT** — asset purchases lower spreads; sales cool bubbles
-- **Tariffs** — trade protection; raises inflation, drags long-run growth
+        # Layout rects
+        self._compute_rects()
 
-**📊 KEY TARGETS**
-- Inflation: 2–3% ✅  
-- GDP Growth: > 2% ✅  
-- Debt / GDP: < 100% ✅  
-- Unemployment: < 6% ✅
-            """)
+        # Screens
+        self.mode = "select"   # "select" | "game" | "gameover"
+        self.selected_country: str | None = None
+        self.game_over_shown = False
 
-    st.markdown('<div style="text-align:center;margin:2rem 0 1rem;font-size:0.7rem;color:#4a6080;letter-spacing:0.2em;text-transform:uppercase;">— SELECT YOUR COUNTRY —</div>', unsafe_allow_html=True)
+        # Build selection screen buttons
+        self._build_select_buttons()
 
-    cols = st.columns(4)
-    for i, (name, data) in enumerate(COUNTRIES.items()):
-        with cols[i % 4]:
-            preset = COUNTRIES[name]
-            st.markdown(f"""
-            <div style="background:#0f1629;border:1px solid #1e2d4a;border-radius:8px;padding:1rem;text-align:center;margin-bottom:0.5rem;">
-                <div style="font-size:2rem;margin-bottom:0.3rem;">{data['flag']}</div>
-                <div style="font-size:0.75rem;font-weight:600;color:#c8d8f0;margin-bottom:0.5rem;">{name}</div>
-                <div style="font-size:0.65rem;color:#4a6080;">
-                    GDP Growth: <span style="color:#00e5ff;">{preset['gdp_growth']}%</span><br>
-                    Inflation: <span style="color:#ff4d6d;">{preset['inflation']}%</span><br>
-                    Rate: <span style="color:#ffd166;">{preset['interest_rate']}%</span><br>
-                    Debt/GDP: <span style="color:#ff9900;">{preset['debt_gdp']}%</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-            if st.button(f"▶  Play as {name.split()[0]}", key=f"start_{name}", use_container_width=True):
-                _start_game(name)
-                st.rerun()
+        # Build control buttons (game screen)
+        self._build_control_buttons()
 
+        # Tooltip
+        self.tooltip_country: str | None = None
+        self.tooltip_pos = (0, 0)
 
-# ─────────────────────────────────────────────
-# Game screen
-# ─────────────────────────────────────────────
+        # Game-over state cache
+        self.go_msg = ""
+        self.go_win = False
 
-def render_sidebar(gs: GameState) -> dict:
-    """Render the control panel sidebar. Returns the player's chosen inputs."""
-    with st.sidebar:
-        st.markdown(f"""
-        <div style="text-align:center;padding:0.5rem 0 1rem;">
-            <div style="font-size:2rem;">{gs.flag}</div>
-            <div style="font-size:0.9rem;font-weight:700;color:#00e5ff;letter-spacing:0.1em;">{gs.country_name.upper()}</div>
-            <div style="font-size:0.65rem;color:#4a6080;">GOVERNOR'S COMMAND CENTER</div>
-        </div>
-        """, unsafe_allow_html=True)
+    # ─────────────────────────── layout ─────────────────────────────────────
+    def _compute_rects(self):
+        W, H = self.WIN_W, self.WIN_H
+        P = self.PAD
 
-        st.markdown("---")
+        self.hdr_rect   = pygame.Rect(P, P, W - 2*P, self.HDR_H)
+        self.bot_rect   = pygame.Rect(P, H - self.BOT_H - P, W - 2*P, self.BOT_H)
 
-        # Reputation & day
-        st.markdown(_reputation_bar(gs.reputation), unsafe_allow_html=True)
-        st.markdown(_day_progress(gs.day, gs.max_days), unsafe_allow_html=True)
+        inner_y = self.hdr_rect.bottom + P
+        inner_h = self.bot_rect.top - inner_y - P
 
-        st.markdown("---")
-        st.markdown('<div style="font-size:0.65rem;color:#4a6080;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:0.75rem;">◆ MONETARY POLICY</div>', unsafe_allow_html=True)
+        self.left_rect  = pygame.Rect(P, inner_y, self.LEFT_W, inner_h)
+        self.right_rect = pygame.Rect(W - self.RIGHT_W - P, inner_y, self.RIGHT_W, inner_h)
 
-        rate_override = st.slider(
-            "Rate Override (pp vs Taylor Rule)",
-            min_value=-5.0, max_value=5.0,
-            value=float(gs.rate_override), step=0.25,
-            help="Positive = tighter than Taylor Rule. Negative = looser.",
+        mid_x = self.left_rect.right + P
+        mid_w = self.right_rect.left - mid_x - P
+        self.mid_rect   = pygame.Rect(mid_x, inner_y, mid_w, inner_h)
+
+        # 4 charts in 2×2 grid
+        cw = self.mid_rect.width  // 2 - 1
+        ch = self.mid_rect.height // 2 - 1
+        mx, my = self.mid_rect.x, self.mid_rect.y
+        self.chart_rects = [
+            pygame.Rect(mx,       my,       cw, ch),
+            pygame.Rect(mx+cw+2,  my,       cw, ch),
+            pygame.Rect(mx,       my+ch+2,  cw, ch),
+            pygame.Rect(mx+cw+2,  my+ch+2,  cw, ch),
+        ]
+        self.chart_labels = ["GDP GROWTH (%)", "INFLATION (%)", "DEBT / GDP (%)", "FX / USD"]
+        self.chart_keys   = ["g", "pi", "d", "s"]
+
+    def _build_select_buttons(self):
+        self.select_buttons: dict[str, pygame.Rect] = {}
+        names = list(self.engine.countries.keys())
+        cols, rows = 4, 2
+        bw, bh = 160, 80
+        total_w = cols * bw + (cols - 1) * 10
+        total_h = rows * bh + (rows - 1) * 10
+        sx = (self.WIN_W - total_w) // 2
+        sy = (self.WIN_H - total_h) // 2 + 40
+        for i, name in enumerate(names):
+            col, row = i % cols, i // cols
+            rx = sx + col * (bw + 10)
+            ry = sy + row * (bh + 10)
+            self.select_buttons[name] = pygame.Rect(rx, ry, bw, bh)
+
+    def _build_control_buttons(self):
+        rx = self.right_rect.x + self.PAD
+        ry = self.right_rect.y + self.PAD
+
+        bw, bh = 40, 22
+
+        # Layout helpers: arranged vertically inside right panel
+        # We'll position them during draw since we don't know right_rect until layout.
+        # Store as relative offsets; resolve in draw.
+        self.ctrl_buttons: dict[str, Button] = {}
+
+        # Playback row (bottom bar)
+        bbot = self.bot_rect
+        self.ctrl_buttons["start"]   = Button((bbot.x + 10,           bbot.y + 14, 70, 22), "START",  PRIMARY)
+        self.ctrl_buttons["pause"]   = Button((bbot.x + 90,           bbot.y + 14, 70, 22), "PAUSE",  SECONDARY)
+        self.ctrl_buttons["spd_dn"]  = Button((bbot.right - 130,      bbot.y + 14, 30, 22), " - ",    BORDER)
+        self.ctrl_buttons["spd_up"]  = Button((bbot.right - 60,       bbot.y + 14, 30, 22), " + ",    BORDER)
+
+        # Policy controls inside right panel (built dynamically in draw)
+
+    # ─────────────────────────── main loop ───────────────────────────────────
+    def run(self):
+        running = True
+        while running:
+            events = pygame.event.get()
+            for ev in events:
+                if ev.type == pygame.QUIT:
+                    running = False
+                self._handle_event(ev)
+
+            # Advance simulation
+            self.engine.tick()
+
+            # Check for game-over
+            if self.engine.game_over_state and not self.game_over_shown:
+                self.go_win = self.engine.game_over_state["win"]
+                self.go_msg = self.engine.game_over_state["reason"]
+                self.mode = "gameover"
+                self.game_over_shown = True
+
+            # Draw
+            self.screen.fill(BG_DARKER)
+            if self.mode == "select":
+                self._draw_select()
+            elif self.mode == "game":
+                self._draw_game()
+            elif self.mode == "gameover":
+                self._draw_game()       # draw game behind overlay
+                self._draw_gameover()
+
+            pygame.display.flip()
+            self.clock.tick(self.FPS)
+
+        pygame.quit()
+
+    # ─────────────────────────── input ──────────────────────────────────────
+    def _handle_event(self, ev):
+        if self.mode == "select":
+            self._handle_select(ev)
+        elif self.mode == "game":
+            self._handle_game(ev)
+        elif self.mode == "gameover":
+            if ev.type == pygame.KEYDOWN or (ev.type == pygame.MOUSEBUTTONDOWN):
+                self.mode = "game"   # dismiss overlay
+
+    def _handle_select(self, ev):
+        if ev.type == pygame.MOUSEBUTTONDOWN:
+            for name, rect in self.select_buttons.items():
+                if rect.collidepoint(ev.pos):
+                    self.selected_country = name
+                    self.engine.set_player_country(name)
+                    self.mode = "game"
+
+    def _handle_game(self, ev):
+        # Tooltip
+        if ev.type == pygame.MOUSEMOTION:
+            self.tooltip_country = None
+            self.tooltip_pos = ev.pos
+            for name, rect in self._country_row_rects.items():
+                if rect.collidepoint(ev.pos):
+                    self.tooltip_country = name
+
+        # Bottom-bar buttons
+        if self.ctrl_buttons["start"].handle(ev):
+            if not self.engine.running:
+                self.engine.start()
+        if self.ctrl_buttons["pause"].handle(ev):
+            if self.engine.running:
+                self.engine.pause()
+            else:
+                self.engine.start()
+        if self.ctrl_buttons["spd_dn"].handle(ev):
+            self.engine.set_speed(self.engine.speed - 0.5)
+        if self.ctrl_buttons["spd_up"].handle(ev):
+            self.engine.set_speed(self.engine.speed + 0.5)
+
+        # Policy buttons (detected by tag)
+        if ev.type == pygame.MOUSEBUTTONDOWN:
+            pc = self.engine.player_controls
+            for tag, rect in self._policy_button_rects.items():
+                if rect.collidepoint(ev.pos):
+                    if tag == "rate_dn":
+                        pc["rate_override"] = clamp(pc["rate_override"] - 0.25, -5.0, 5.0)
+                    elif tag == "rate_up":
+                        pc["rate_override"] = clamp(pc["rate_override"] + 0.25, -5.0, 5.0)
+                    elif tag == "fis_dn":
+                        pc["fiscal_balance"] = clamp(round(pc["fiscal_balance"] - 0.1, 1), -10, 5)
+                    elif tag == "fis_up":
+                        pc["fiscal_balance"] = clamp(round(pc["fiscal_balance"] + 0.1, 1), -10, 5)
+                    elif tag == "tar_dn":
+                        pc["tariff_level"] = clamp(pc["tariff_level"] - 1, 0, 50)
+                    elif tag == "tar_up":
+                        pc["tariff_level"] = clamp(pc["tariff_level"] + 1, 0, 50)
+                    elif tag == "qt":
+                        pc["asset_purchases"] = clamp(pc["asset_purchases"] - 10, -200, 500)
+                    elif tag == "qe":
+                        pc["asset_purchases"] = clamp(pc["asset_purchases"] + 10, -200, 500)
+
+    # ─────────────────────────── SELECT SCREEN ───────────────────────────────
+    def _draw_select(self):
+        s = self.screen
+        s.fill(BG_DARK)
+
+        title = self.font_mono_xl.render("GLOBAL MACRO — SELECT YOUR SOVEREIGN", True, PRIMARY)
+        s.blit(title, title.get_rect(centerx=self.WIN_W // 2, y=80))
+
+        sub = self.font_ui.render(
+            "Choose the nation you will guide through turbulent tides of the global economy.",
+            True, TEXT_SEC
         )
-        qe_qt = st.slider(
-            "QE / QT (% GDP)",
-            min_value=-3.0, max_value=3.0,
-            value=float(gs.qe_qt), step=0.25,
-            help="Positive = asset purchases (QE). Negative = asset sales (QT).",
-        )
+        s.blit(sub, sub.get_rect(centerx=self.WIN_W // 2, y=120))
 
-        st.markdown('<div style="font-size:0.65rem;color:#4a6080;letter-spacing:0.15em;text-transform:uppercase;margin:0.75rem 0;">◆ FISCAL POLICY</div>', unsafe_allow_html=True)
+        mx, my = pygame.mouse.get_pos()
+        for name, rect in self.select_buttons.items():
+            hov = rect.collidepoint(mx, my)
+            border_col = PRIMARY if hov else BORDER
+            bg_col     = (20, 30, 20) if hov else BG_PANEL
+            pygame.draw.rect(s, bg_col, rect)
+            pygame.draw.rect(s, border_col, rect, 1)
 
-        fiscal_balance = st.slider(
-            "Primary Balance (% GDP)",
-            min_value=-8.0, max_value=8.0,
-            value=float(gs.fiscal_balance), step=0.5,
-            help="Negative = deficit (stimulative). Positive = surplus (contractionary).",
-        )
+            flag_txt = self.font_mono_xl.render(name[:2], True, ACCENT)  # fallback
+            # Render name
+            nm = self.font_mono_med.render(name, True, TEXT_PRI if not hov else PRIMARY)
+            s.blit(nm, nm.get_rect(centerx=rect.centerx, y=rect.y + 14))
 
-        st.markdown('<div style="font-size:0.65rem;color:#4a6080;letter-spacing:0.15em;text-transform:uppercase;margin:0.75rem 0;">◆ TRADE POLICY</div>', unsafe_allow_html=True)
-
-        tariff_rate = st.slider(
-            "Tariff Rate (%)",
-            min_value=0.0, max_value=50.0,
-            value=float(gs.tariff_rate), step=1.0,
-            help="Higher tariffs boost short-term trade balance but hurt long-run growth.",
-        )
-
-        st.markdown("---")
-
-        # Advance controls
-        st.markdown('<div style="font-size:0.65rem;color:#4a6080;letter-spacing:0.15em;text-transform:uppercase;margin-bottom:0.5rem;">◆ ADVANCE SIMULATION</div>', unsafe_allow_html=True)
-
-        speed = st.select_slider(
-            "Step Size",
-            options=[7, 14, 30, 60, 90],
-            value=st.session_state.speed,
-            format_func=lambda x: f"{x} days",
-        )
-        st.session_state.speed = speed
-
-        col_a, col_b = st.columns(2)
-        with col_a:
-            advance = st.button("▶  ADVANCE", use_container_width=True)
-        with col_b:
-            auto_toggle = st.button(
-                "⏸  PAUSE" if st.session_state.auto_play else "⏩  AUTO",
-                use_container_width=True,
+            # Country stats mini preview
+            c = self.engine.countries[name]
+            stat = self.font_mono_sm.render(
+                f"g:{c['g']:.1f}%  π:{c['pi']:.1f}%  d:{c['d']:.0f}%",
+                True, TEXT_SEC
             )
+            s.blit(stat, stat.get_rect(centerx=rect.centerx, y=rect.y + 46))
 
-        if auto_toggle:
-            st.session_state.auto_play = not st.session_state.auto_play
+    # ─────────────────────────── GAME SCREEN ─────────────────────────────────
+    def _draw_game(self):
+        s = self.screen
+        self._country_row_rects = {}   # reset for hit-testing
+        self._policy_button_rects = {}
 
-        st.markdown("---")
-        if st.button("↩  RESTART", use_container_width=True):
-            _reset()
-            st.rerun()
+        self._draw_header(s)
+        self._draw_left_panel(s)
+        self._draw_charts(s)
+        self._draw_right_panel(s)
+        self._draw_bottom_bar(s)
+        if self.tooltip_country:
+            self._draw_tooltip(s)
 
-    return {
-        "rate_override": rate_override,
-        "qe_qt": qe_qt,
-        "fiscal_balance": fiscal_balance,
-        "tariff_rate": tariff_rate,
-        "advance": advance,
-    }
+    def _draw_header(self, s):
+        r = self.hdr_rect
+        pygame.draw.rect(s, BG_PANEL, r)
+        pygame.draw.rect(s, BORDER, r, 1)
 
+        title = self.font_mono_xl.render("GLOBAL MACRO", True, PRIMARY)
+        s.blit(title, (r.x + 15, r.y + (r.h - title.get_height()) // 2))
 
-def _delta_arrow(current: float, history: list[float]) -> str:
-    if len(history) < 2:
-        return "—"
-    prev = history[-2]
-    diff = current - prev
-    arrow = "▲" if diff > 0 else "▼" if diff < 0 else "—"
-    return f"{arrow} {abs(diff):.2f}"
+        # Ticker
+        tx = r.x + 180
+        ty = r.y + (r.h - 10) // 2
+        items = [
+            ("OIL",    f"${self.engine.global_state['P_oil']:.2f}"),
+            ("RISK",   f"{self.engine.global_state['chi']:.2f}"),
+            ("US 10Y", f"{self.engine.global_state['R_world']:.2f}%"),
+        ]
+        for label, val in items:
+            lbl = self.font_mono_sm.render(label, True, TEXT_SEC)
+            v   = self.font_mono_sm.render(val,   True, PRIMARY)
+            s.blit(lbl, (tx, ty)); tx += lbl.get_width() + 4
+            s.blit(v,   (tx, ty)); tx += v.get_width() + 18
 
+        # Right side
+        day_txt = self.font_mono_med.render(
+            f"Day {int(self.engine.time)} / {self.engine.TERM_LENGTH}", True, ACCENT
+        )
+        s.blit(day_txt, (r.right - day_txt.get_width() - 150, r.y + 12))
 
-def render_game(gs: GameState) -> None:
-    """Main game screen."""
-    # Header
-    pct_done = gs.day / gs.max_days * 100
-    st.markdown(f"""
-    <div class="gm-header">
-        <div style="flex:1;">
-            <div class="gm-title">⬡ GLOBAL MACRO</div>
-            <div class="gm-subtitle">{gs.flag} {gs.country_name} · {gs.currency} · Day {gs.day} / {gs.max_days}</div>
-        </div>
-        <div style="text-align:right;">
-            <div style="font-size:0.65rem;color:#4a6080;letter-spacing:0.12em;text-transform:uppercase;">Term Progress</div>
-            <div style="font-size:1.2rem;font-weight:700;color:#bd93f9;">{pct_done:.1f}%</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        if self.selected_country:
+            pc_txt = self.font_mono_sm.render(
+                f"Managing: {self.selected_country}", True, TEXT_PRI
+            )
+            s.blit(pc_txt, (r.right - pc_txt.get_width() - 15, r.y + 32))
 
-    # Active shock banner
-    if gs.last_shock:
-        st.markdown(f'<div class="alert-box alert-warning">⚡ MARKET EVENT: {gs.last_shock.upper()}</div>', unsafe_allow_html=True)
+    def _draw_left_panel(self, s):
+        r = self.left_rect
+        pygame.draw.rect(s, BG_PANEL, r)
+        pygame.draw.rect(s, BORDER, r, 1)
 
-    # ── KPI strip ──────────────────────────────────────────────────────
-    cols = st.columns(8)
+        hdr = self.font_mono_sm.render("MARKET MONITOR", True, TEXT_SEC)
+        s.blit(hdr, (r.x + 8, r.y + 8))
+        pygame.draw.line(s, BORDER, (r.x, r.y + 24), (r.right, r.y + 24))
 
-    kpi_data = [
-        ("GDP Growth", f"{gs.gdp_growth:+.2f}%", PALETTE["gdp"],
-         _delta_arrow(gs.gdp_growth, gs.history_gdp_growth)),
-        ("Inflation", f"{gs.inflation:.2f}%", PALETTE["inflation"],
-         _delta_arrow(gs.inflation, gs.history_inflation)),
-        ("Policy Rate", f"{gs.interest_rate:.2f}%", PALETTE["rate"],
-         _delta_arrow(gs.interest_rate, gs.history_interest_rate)),
-        ("Debt / GDP", f"{gs.debt_gdp:.1f}%", PALETTE["debt"],
-         _delta_arrow(gs.debt_gdp, gs.history_debt_gdp)),
-        ("FX vs USD", f"{gs.fx:.3f}", PALETTE["fx"],
-         _delta_arrow(gs.fx, gs.history_fx)),
-        ("Unemployment", f"{gs.unemployment:.1f}%", PALETTE["unemployment"],
-         _delta_arrow(gs.unemployment, gs.history_unemployment)),
-        ("Global Risk χ", f"{gs.global_risk:.2f}", "#ff9900",
-         ""),
-        ("Reputation", f"{gs.reputation:.1f}%", PALETTE["reputation"],
-         _delta_arrow(gs.reputation, gs.history_reputation)),
-    ]
+        cy = r.y + 30
+        for name, c in self.engine.countries.items():
+            row_rect = pygame.Rect(r.x, cy, r.width, 28)
+            self._country_row_rects[name] = row_rect
 
-    for col, (label, value, accent, delta) in zip(cols, kpi_data):
-        with col:
-            st.markdown(_kpi(label, value, accent, delta), unsafe_allow_html=True)
+            is_player = (name == self.selected_country)
+            bg = (0, 30, 15) if is_player else BG_PANEL
+            pygame.draw.rect(s, bg, row_rect)
+            if is_player:
+                pygame.draw.line(s, PRIMARY, (r.x, cy), (r.x, cy + 28), 2)
 
-    st.markdown("<div style='margin:1rem 0'></div>", unsafe_allow_html=True)
+            # Name
+            col = PRIMARY if is_player else TEXT_PRI
+            nm = self.font_mono_sm.render(name[:14], True, col)
+            s.blit(nm, (r.x + 10, cy + 9))
 
-    # ── Tabs ──────────────────────────────────────────────────────────
-    tab_overview, tab_charts, tab_news = st.tabs(
-        ["📊  DASHBOARD", "📈  DETAILED CHARTS", "📰  NEWS FEED"]
-    )
+            # Growth
+            g = c["g"]
+            g_col = PRIMARY if g >= 0 else SECONDARY
+            g_txt = self.font_mono_sm.render(f"{g:+.1f}%", True, g_col)
+            s.blit(g_txt, (r.right - g_txt.get_width() - 6, cy + 9))
 
-    with tab_overview:
-        st.plotly_chart(dashboard_chart(gs), use_container_width=True, config={"displayModeBar": False})
+            pygame.draw.line(s, BORDER, (r.x, cy + 28), (r.right, cy + 28))
+            cy += 28
 
-        # Warnings
-        warnings = []
-        if gs.inflation > 6:    warnings.append(("danger", f"⚠ INFLATION CRISIS: {gs.inflation:.1f}% — far above 2% target. Raise rates urgently."))
-        if gs.inflation < 0:    warnings.append(("danger", f"⚠ DEFLATION RISK: {gs.inflation:.1f}% — cut rates and stimulate."))
-        if gs.gdp_growth < 0:   warnings.append(("danger", f"⚠ RECESSION: Growth at {gs.gdp_growth:.1f}%."))
-        if gs.debt_gdp > 130:   warnings.append(("warning", f"⚠ DEBT ALARM: {gs.debt_gdp:.0f}% — markets watching closely."))
-        if gs.unemployment > 9: warnings.append(("warning", f"⚠ HIGH UNEMPLOYMENT: {gs.unemployment:.1f}%"))
-        if gs.reputation < 25:  warnings.append(("danger", f"⚠ REPUTATION CRITICAL: {gs.reputation:.1f}% — at risk of removal."))
+    def _draw_charts(self, s):
+        if not self.selected_country:
+            return
+        h = self.engine.history
+        c = self.selected_country
+        color = COUNTRY_COLORS.get(c, TEXT_PRI)
 
-        for kind, msg in warnings:
-            st.markdown(f'<div class="alert-box alert-{kind}">{msg}</div>', unsafe_allow_html=True)
+        for i, (rect, label, key) in enumerate(
+            zip(self.chart_rects, self.chart_labels, self.chart_keys)
+        ):
+            data = h["countries"][c][key]
+            pygame.draw.rect(s, BG_PANEL, rect)
+            pygame.draw.rect(s, BORDER, rect, 1)
 
-        if not warnings:
-            st.markdown('<div class="alert-box alert-success">✔ ALL INDICATORS WITHIN ACCEPTABLE RANGE</div>', unsafe_allow_html=True)
+            lbl = self.font_mono_sm.render(label, True, TEXT_SEC)
+            s.blit(lbl, (rect.x + 5, rect.y + 4))
 
-    with tab_charts:
-        r1c1, r1c2 = st.columns(2)
-        with r1c1:
-            st.plotly_chart(gdp_growth_chart(gs), use_container_width=True, config={"displayModeBar": False})
-            st.plotly_chart(interest_rate_chart(gs), use_container_width=True, config={"displayModeBar": False})
-            st.plotly_chart(unemployment_chart(gs), use_container_width=True, config={"displayModeBar": False})
-        with r1c2:
-            st.plotly_chart(inflation_chart(gs), use_container_width=True, config={"displayModeBar": False})
-            st.plotly_chart(debt_chart(gs), use_container_width=True, config={"displayModeBar": False})
-            st.plotly_chart(fx_chart(gs), use_container_width=True, config={"displayModeBar": False})
+            inner = pygame.Rect(rect.x + 2, rect.y + 16, rect.width - 4, rect.height - 20)
+            draw_line_chart(s, inner, data, color, bg=BG_PANEL)
 
-    with tab_news:
-        st.markdown('<div style="font-size:0.65rem;color:#4a6080;letter-spacing:0.2em;text-transform:uppercase;margin-bottom:1rem;">— LIVE MARKET INTELLIGENCE FEED —</div>', unsafe_allow_html=True)
-        _render_news(gs)
+    def _draw_right_panel(self, s):
+        r = self.right_rect
+        pygame.draw.rect(s, BG_PANEL, r)
+        pygame.draw.rect(s, BORDER, r, 1)
 
+        hdr = self.font_mono_sm.render("COMMAND CENTER", True, TEXT_SEC)
+        s.blit(hdr, (r.x + 8, r.y + 8))
+        pygame.draw.line(s, BORDER, (r.x, r.y + 24), (r.right, r.y + 24))
 
-# ─────────────────────────────────────────────
-# End screen
-# ─────────────────────────────────────────────
+        cy = r.y + 30
 
-def render_end(gs: GameState) -> None:
-    score = final_score(gs)
+        # ── Dashboard ──
+        if self.selected_country:
+            pc = self.engine.countries[self.selected_country]
+            rep = self.engine.reputation
+            rep_col = PRIMARY if rep > 50 else (TEXT_PRI if rep > 25 else SECONDARY)
 
-    grade_colors = {"S": "#00e5ff", "A": "#a8ff78", "B": "#ffd166", "C": "#ff9900", "D": "#ff79c6", "F": "#ff4d6d"}
-    gc = grade_colors.get(score.get("grade", "F"), "#c8d8f0")
+            dash = [
+                ("REPUTATION",  f"{rep:.1f}%",          rep_col),
+                ("REAL GDP",    f"${pc['Y_real']:.2f}T", TEXT_PRI),
+                ("NOM GDP",     f"${pc['Y_nom']:.2f}T",  TEXT_PRI),
+                ("GROWTH",      f"{pc['g']:.2f}%",       PRIMARY if pc['g'] >= 0 else SECONDARY),
+                ("INFLATION",   f"{pc['pi']:.2f}%",      PRIMARY if pc['pi'] <= 2 else SECONDARY),
+                ("DEBT/GDP",    f"{pc['d']:.1f}%",       PRIMARY if pc['d'] < 100 else SECONDARY),
+                ("RATE",        f"{pc['i']:.2f}%",       ACCENT),
+            ]
+            pygame.draw.rect(s, BG_LIGHT, (r.x, cy, r.width, len(dash) * 18 + 6))
+            for label, val, col in dash:
+                lbl = self.font_mono_sm.render(label, True, TEXT_SEC)
+                v   = self.font_mono_sm.render(val,   True, col)
+                s.blit(lbl, (r.x + 8,            cy + 3))
+                s.blit(v,   (r.right - v.get_width() - 8, cy + 3))
+                cy += 18
+            cy += 6
+            pygame.draw.line(s, BORDER, (r.x, cy), (r.right, cy))
+            cy += 8
 
-    st.markdown(f"""
-    <div style="text-align:center;padding:3rem 0 2rem;">
-        <div style="font-size:0.7rem;color:#4a6080;letter-spacing:0.3em;text-transform:uppercase;margin-bottom:1rem;">
-            {'— TERM COMPLETE —' if gs.game_won else '— MANDATE ENDED —'}
-        </div>
-        <div style="font-size:4rem;margin-bottom:0.5rem;">{'🏆' if gs.game_won else '📉'}</div>
-        <div style="font-size:1.1rem;color:#c8d8f0;max-width:500px;margin:0 auto 2rem;">{gs.end_reason}</div>
-        <div style="font-size:6rem;font-weight:700;color:{gc};line-height:1;text-shadow:0 0 40px {gc}88;">
-            {score.get('grade','?')}
-        </div>
-        <div style="font-size:1rem;color:#4a6080;margin-top:0.25rem;">
-            FINAL SCORE: {score.get('total',0):.1f} / 100
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+        # ── Policy Controls ──
+        pc_ctrl = self.engine.player_controls
+        controls = [
+            ("RATE OVERRIDE (bps)",     "rate_override",   "rate_dn",  "rate_up",
+             f"{pc_ctrl['rate_override']*100:+.0f}"),
+            ("ASSET PURCHASES ($B/mo)", "asset_purchases", "qt",       "qe",
+             f"{pc_ctrl['asset_purchases']:+.0f}"),
+            ("FISCAL BALANCE (% GDP)",  "fiscal_balance",  "fis_dn",   "fis_up",
+             f"{pc_ctrl['fiscal_balance']:.1f}"),
+            ("TARIFF LEVEL (%)",        "tariff_level",    "tar_dn",   "tar_up",
+             f"{pc_ctrl['tariff_level']:.0f}"),
+        ]
 
-    # Score breakdown
-    c1, c2, c3, c4 = st.columns(4)
-    breakdown = [
-        (c1, "Growth Score", score.get("growth_score", 0), 40, PALETTE["gdp"]),
-        (c2, "Inflation Score", score.get("inflation_score", 0), 30, PALETTE["inflation"]),
-        (c3, "Debt Score", score.get("debt_score", 0), 20, PALETTE["debt"]),
-        (c4, "Survival Score", score.get("survival_score", 0), 10, PALETTE["reputation"]),
-    ]
-    for col, label, val, mx, color in breakdown:
-        with col:
-            st.markdown(_kpi(label, f"{val:.1f}/{mx}", color), unsafe_allow_html=True)
+        bw, bh = 42, 20
+        for cfg_label, _, tag_dn, tag_up, display_val in controls:
+            lbl = self.font_mono_sm.render(cfg_label, True, ACCENT)
+            s.blit(lbl, (r.x + 8, cy))
+            cy += 16
 
-    st.markdown("<div style='margin:1rem 0'></div>", unsafe_allow_html=True)
+            row_rect = pygame.Rect(r.x + 4, cy, r.width - 8, bh + 4)
+            pygame.draw.rect(s, BG_DARKER, row_rect)
+            pygame.draw.rect(s, BORDER, row_rect, 1)
 
-    # Stats row
-    c1, c2, c3, c4 = st.columns(4)
-    stats = [
-        (c1, "Avg GDP Growth", f"{score.get('avg_growth',0):.2f}%", PALETTE["gdp"]),
-        (c2, "Avg Inflation", f"{score.get('avg_inflation',0):.2f}%", PALETTE["inflation"]),
-        (c3, "Avg Debt/GDP", f"{score.get('avg_debt',0):.1f}%", PALETTE["debt"]),
-        (c4, "Days Survived", str(score.get('days_survived', 0)), PALETTE["reputation"]),
-    ]
-    for col, label, val, color in stats:
-        with col:
-            st.markdown(_kpi(label, val, color), unsafe_allow_html=True)
+            btn_dn = pygame.Rect(row_rect.x + 4, cy + 2, bw, bh)
+            btn_up = pygame.Rect(row_rect.right - bw - 4, cy + 2, bw, bh)
+            self._policy_button_rects[tag_dn] = btn_dn
+            self._policy_button_rects[tag_up] = btn_up
 
-    st.markdown("<div style='margin:2rem 0'></div>", unsafe_allow_html=True)
-    col_a, col_b, _ = st.columns([1, 1, 2])
-    with col_a:
-        if st.button("▶  PLAY AGAIN", use_container_width=True):
-            _start_game(gs.country_name)
-            st.rerun()
-    with col_b:
-        if st.button("↩  MAIN MENU", use_container_width=True):
-            _reset()
-            st.rerun()
+            mx, my_ = pygame.mouse.get_pos()
+            for btn_rect, tag, blabel in [(btn_dn, tag_dn, "  –  "), (btn_up, tag_up, "  +  ")]:
+                hov = btn_rect.collidepoint(mx, my_)
+                col = PRIMARY if hov else BORDER
+                bg  = (0, 40, 20) if hov else BG_LIGHT
+                pygame.draw.rect(s, bg, btn_rect)
+                pygame.draw.rect(s, col, btn_rect, 1)
+                bt = self.font_mono_med.render(blabel, True, col)
+                s.blit(bt, bt.get_rect(center=btn_rect.center))
 
+            val_txt = self.font_mono_med.render(display_val, True, PRIMARY)
+            s.blit(val_txt, val_txt.get_rect(centerx=row_rect.centerx, centery=row_rect.centery))
 
-# ─────────────────────────────────────────────
-# Main entrypoint
-# ─────────────────────────────────────────────
+            cy += bh + 14
 
-def main() -> None:
-    _init_state()
-    gs: GameState = st.session_state.gs
+        pygame.draw.line(s, BORDER, (r.x, cy), (r.right, cy))
+        cy += 6
 
-    if st.session_state.screen == "home" or gs is None:
-        render_home()
-        return
+        # ── News wire ──
+        wire_lbl = self.font_mono_sm.render("NEWS WIRE", True, SECONDARY)
+        s.blit(wire_lbl, (r.x + 8, cy))
+        cy += 16
 
-    # ── Sidebar controls ──
-    controls = render_sidebar(gs)
+        for ev in self.engine.events[:8]:
+            if cy > r.bottom - 14:
+                break
+            day_str = self.font_mono_sm.render(f"Day {int(ev['time'])}", True, ACCENT)
+            s.blit(day_str, (r.x + 8, cy))
+            cy += 12
 
-    # Apply control inputs to state
-    gs.rate_override = controls["rate_override"]
-    gs.qe_qt = controls["qe_qt"]
-    gs.fiscal_balance = controls["fiscal_balance"]
-    gs.tariff_rate = controls["tariff_rate"]
+            # Word-wrap event text
+            words = ev["text"].split()
+            line, lines = "", []
+            for w in words:
+                test = line + w + " "
+                if self.font_mono_sm.size(test)[0] > r.width - 20:
+                    lines.append(line)
+                    line = w + " "
+                else:
+                    line = test
+            lines.append(line)
 
-    # ── Game over? ──
-    if gs.game_over:
-        render_end(gs)
-        return
+            for ln in lines[:2]:
+                if cy > r.bottom - 12:
+                    break
+                t = self.font_mono_sm.render(ln.strip(), True, TEXT_SEC)
+                s.blit(t, (r.x + 8, cy))
+                cy += 12
+            cy += 4
 
-    # ── Advance simulation ──
-    should_advance = controls["advance"] or st.session_state.auto_play
-    if should_advance:
-        step(gs, days=st.session_state.speed)
-        st.session_state.gs = gs
-        if st.session_state.auto_play and not gs.game_over:
-            time.sleep(0.4)
-        st.rerun()
+    def _draw_bottom_bar(self, s):
+        r = self.bot_rect
+        pygame.draw.rect(s, BG_PANEL, r)
+        pygame.draw.rect(s, BORDER, r, 1)
 
-    # ── Render game ──
-    render_game(gs)
+        # Draw playback buttons
+        for key in ("start", "pause", "spd_dn", "spd_up"):
+            self.ctrl_buttons[key].draw(s, self.font_mono_sm)
 
+        # Speed display
+        spd = self.font_mono_sm.render(f"SPEED: {self.engine.speed:.1f}x", True, TEXT_PRI)
+        s.blit(spd, (self.ctrl_buttons["spd_dn"].rect.x - spd.get_width() - 8,
+                     r.y + (r.h - spd.get_height()) // 2))
 
-if __name__ == "__main__":
-    main()
+        # Credits
+        cr = self.font_mono_sm.render(
+            "Global Macro  |  by Venkatakrishnan Asuri  |  Python port", True, TEXT_SEC
+        )
+        s.blit(cr, cr.get_rect(centerx=self.WIN_W // 2, centery=r.centery))
+
+    def _draw_tooltip(self, s):
+        name = self.tooltip_country
+        c = self.engine.countries[name]
+
+        lines = [
+            (name,              PRIMARY,   True),
+            ("",                TEXT_SEC,  False),
+            (f"Growth:  {c['g']:.2f}%",     TEXT_PRI, False),
+            (f"Inflation:{c['pi']:.2f}%",    TEXT_PRI, False),
+            (f"Debt/GDP:{c['d']:.1f}%",      TEXT_PRI, False),
+            (f"Rate:    {c['i']:.2f}%",      TEXT_PRI, False),
+            (f"Spread:  {c['rho']:.2f}%",    TEXT_PRI, False),
+        ]
+
+        tw = max(self.font_mono_sm.size(l)[0] for l, _, _ in lines if l) + 20
+        th = len(lines) * 14 + 10
+        tx = min(self.tooltip_pos[0] + 15, self.WIN_W - tw - 5)
+        ty = min(self.tooltip_pos[1] + 15, self.WIN_H - th - 5)
+
+        pygame.draw.rect(s, BG_PANEL,  (tx, ty, tw, th))
+        pygame.draw.rect(s, PRIMARY,   (tx, ty, tw, th), 1)
+
+        for i, (text, col, bold) in enumerate(lines):
+            if text:
+                ft = self.font_mono_med if bold else self.font_mono_sm
+                t = ft.render(text, True, col)
+                s.blit(t, (tx + 8, ty + 5 + i * 14))
+
+    def _draw_gameover(self):
+        s = self.screen
+        overlay = pygame.Surface((self.WIN_W, self.WIN_H), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 180))
+        s.blit(overlay, (0, 0))
+
+        col   = PRIMARY if self.go_win else SECONDARY
+        title = "TERM COMPLETE — VICTORY!" if self.go_win else "DISMISSED — GAME OVER"
+        t1 = self.font_mono_xl.render(title, True, col)
+        t2 = self.font_mono_lg.render(self.go_msg, True, TEXT_PRI)
+        t3 = self.font_mono_sm.render("Press any key to continue.", True, TEXT_SEC)
+
+        cx, cy = self.WIN_W // 2, self.WIN_H // 2 - 30
+        s.blit(t1, t1.get_rect(centerx=cx, y=cy))
+        s.blit(t2, t2.get_rect(centerx=cx, y=cy + 40))
+        s.blit(t3, t3.get_rect(centerx=cx, y=cy + 75))
